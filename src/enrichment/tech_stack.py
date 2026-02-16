@@ -6,7 +6,6 @@ import logging
 import re
 
 from src.enrichment.base import BaseEnricher
-from src.database.models import Lead
 from src.scrapers.http_client import ScraperHttpClient
 
 logger = logging.getLogger(__name__)
@@ -73,7 +72,7 @@ class TechStackEnricher(BaseEnricher):
     def __init__(self):
         self.http = ScraperHttpClient()
 
-    def enrich(self, lead: Lead) -> dict:
+    def enrich(self, lead) -> dict:
         if not lead.website:
             return {}
 

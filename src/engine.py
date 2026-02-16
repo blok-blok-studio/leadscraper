@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone
 
 from src.config import load_config
-from src.database.connection import get_session, init_db
+from src.database.connection import get_client, disconnect
 from src.database.repository import LeadRepository, JobRepository
 from src.scrapers.registry import get_scraper
 from src.enrichment.pipeline import EnrichmentPipeline
@@ -20,9 +20,8 @@ class ScraperEngine:
 
     def __init__(self, config_path: str = None):
         self.config = load_config(config_path)
-        init_db()
 
-    def run(self) -> dict:
+    async def run(self) -> dict:
         """Run the full scraping pipeline based on config."""
         targeting = self.config["targeting"]
         scraping = self.config["scraping"]
@@ -49,7 +48,7 @@ class ScraperEngine:
         for source_name in sources:
             for category in categories:
                 for location in locations:
-                    stats = self._scrape_single(
+                    stats = await self._scrape_single(
                         source_name, category, location, max_pages
                     )
                     total_stats["total_found"] += stats.get("found", 0)
@@ -61,22 +60,22 @@ class ScraperEngine:
 
         # Run enrichment if enabled
         if enrichment_config.get("enabled", True):
-            enriched = self._run_enrichment(enrichment_config)
+            enriched = await self._run_enrichment(enrichment_config)
             total_stats["total_enriched"] = enriched
 
+        await disconnect()
         logger.info(f"Scraping complete: {total_stats}")
         return total_stats
 
-    def _scrape_single(
+    async def _scrape_single(
         self, source_name: str, category: str, location: str, max_pages: int
     ) -> dict:
         """Scrape a single source/category/location combination."""
-        session = get_session()
-        lead_repo = LeadRepository(session)
-        job_repo = JobRepository(session)
+        db = await get_client()
+        lead_repo = LeadRepository(db)
+        job_repo = JobRepository(db)
 
-        job = job_repo.create_job(source_name, category, location)
-        session.commit()
+        job = await job_repo.create_job(source_name, category, location)
 
         stats = {"found": 0, "new": 0, "updated": 0, "skipped": 0, "error": None}
 
@@ -87,7 +86,7 @@ class ScraperEngine:
 
             for lead_data in leads:
                 try:
-                    lead, is_new = lead_repo.upsert_lead(lead_data)
+                    lead, is_new = await lead_repo.upsert_lead(lead_data)
                     if is_new:
                         stats["new"] += 1
                     else:
@@ -96,12 +95,10 @@ class ScraperEngine:
                     stats["skipped"] += 1
                     logger.debug(f"Skipped lead: {e}")
 
-            session.commit()
-            job_repo.complete_job(
-                job, stats["found"], stats["new"],
+            await job_repo.complete_job(
+                job.id, stats["found"], stats["new"],
                 stats["updated"], stats["skipped"],
             )
-            session.commit()
 
             logger.info(
                 f"[{source_name}] {category} in {location}: "
@@ -113,20 +110,17 @@ class ScraperEngine:
             error_msg = f"[{source_name}] {category} in {location}: {str(e)}"
             logger.error(error_msg)
             stats["error"] = error_msg
-            job_repo.fail_job(job, str(e))
-            session.commit()
-        finally:
-            session.close()
+            await job_repo.fail_job(job.id, str(e))
 
         return stats
 
-    def _run_enrichment(self, enrichment_config: dict) -> int:
+    async def _run_enrichment(self, enrichment_config: dict) -> int:
         """Run enrichment on unenriched leads."""
         modules = enrichment_config.get("modules", [])
-        session = get_session()
-        lead_repo = LeadRepository(session)
+        db = await get_client()
+        lead_repo = LeadRepository(db)
 
-        unenriched = lead_repo.get_unenriched_leads(limit=200)
+        unenriched = await lead_repo.get_unenriched_leads(limit=200)
         if not unenriched:
             logger.info("No leads to enrich")
             return 0
@@ -134,32 +128,32 @@ class ScraperEngine:
         logger.info(f"Enriching {len(unenriched)} leads...")
 
         with EnrichmentPipeline(enabled_modules=modules) as pipeline:
-            results = pipeline.enrich_batch(unenriched, session)
+            results = await pipeline.enrich_batch(unenriched, db)
 
-        session.close()
         return results["success"]
 
-    def scrape_single_source(
+    async def scrape_single_source(
         self, source: str, category: str, location: str, max_pages: int = 5
     ) -> dict:
         """Scrape a single source/category/location (for CLI use)."""
-        init_db()
-        return self._scrape_single(source, category, location, max_pages)
+        result = await self._scrape_single(source, category, location, max_pages)
+        await disconnect()
+        return result
 
-    def enrich_only(self, limit: int = 100) -> dict:
+    async def enrich_only(self, limit: int = 100) -> dict:
         """Only run enrichment, no scraping."""
-        init_db()
         enrichment_config = self.config.get("enrichment", {})
         modules = enrichment_config.get("modules", [])
-        session = get_session()
-        lead_repo = LeadRepository(session)
+        db = await get_client()
+        lead_repo = LeadRepository(db)
 
-        unenriched = lead_repo.get_unenriched_leads(limit=limit)
+        unenriched = await lead_repo.get_unenriched_leads(limit=limit)
         if not unenriched:
+            await disconnect()
             return {"total": 0, "success": 0, "failed": 0}
 
         with EnrichmentPipeline(enabled_modules=modules) as pipeline:
-            results = pipeline.enrich_batch(unenriched, session)
+            results = await pipeline.enrich_batch(unenriched, db)
 
-        session.close()
+        await disconnect()
         return results

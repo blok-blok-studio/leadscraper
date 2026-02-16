@@ -5,12 +5,14 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from src.database.models import Lead
+from prisma import Prisma
+
 from src.enrichment.tech_stack import TechStackEnricher
 from src.enrichment.social_media import SocialMediaEnricher
 from src.enrichment.contact_enrichment import ContactEnricher
 from src.enrichment.reviews import ReviewsEnricher
 from src.utils.cleaning import calculate_quality_score
+from src.database.models import to_snake_dict, to_prisma_data
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +39,7 @@ class EnrichmentPipeline:
             else:
                 logger.warning(f"Unknown enrichment module: {name}")
 
-    def enrich_lead(self, lead: Lead, session) -> Lead:
+    async def enrich_lead(self, lead, db: Prisma):
         """Run all enrichment modules on a single lead."""
         errors = []
         updates = {}
@@ -50,31 +52,34 @@ class EnrichmentPipeline:
             except Exception as e:
                 errors.append(f"{enricher.MODULE_NAME}: {str(e)}")
 
-        # Apply updates to the lead
-        for field, value in updates.items():
-            if hasattr(lead, field) and value is not None:
-                setattr(lead, field, value)
+        # Convert snake_case updates to camelCase for Prisma
+        prisma_updates = to_prisma_data(updates)
 
-        # Recalculate quality score with enriched data
-        lead_dict = {c.name: getattr(lead, c.name) for c in lead.__table__.columns}
-        lead.quality_score = calculate_quality_score(lead_dict)
+        # Build a combined dict for quality score calculation
+        lead_dict = to_snake_dict(lead)
+        lead_dict.update(updates)
+        quality_score = calculate_quality_score(lead_dict)
 
-        # Mark as enriched
-        lead.is_enriched = True
-        lead.enriched_at = datetime.now(timezone.utc)
+        # Add meta fields
+        prisma_updates["isEnriched"] = True
+        prisma_updates["enrichedAt"] = datetime.now(timezone.utc)
+        prisma_updates["qualityScore"] = quality_score
         if errors:
-            lead.enrichment_errors = "; ".join(errors)
+            prisma_updates["enrichmentErrors"] = "; ".join(errors)
 
-        session.commit()
+        updated = await db.lead.update(
+            where={"id": lead.id},
+            data=prisma_updates,
+        )
 
         logger.info(
-            f"Enriched: {lead.business_name} | "
-            f"Quality: {lead.quality_score} | "
+            f"Enriched: {lead.businessName} | "
+            f"Quality: {quality_score} | "
             f"Errors: {len(errors)}"
         )
-        return lead
+        return updated
 
-    def enrich_batch(self, leads: list[Lead], session) -> dict:
+    async def enrich_batch(self, leads, db: Prisma) -> dict:
         """Enrich a batch of leads. Returns summary stats."""
         total = len(leads)
         success = 0
@@ -82,11 +87,11 @@ class EnrichmentPipeline:
 
         for i, lead in enumerate(leads, 1):
             try:
-                self.enrich_lead(lead, session)
+                await self.enrich_lead(lead, db)
                 success += 1
             except Exception as e:
                 failed += 1
-                logger.error(f"Failed to enrich {lead.business_name}: {e}")
+                logger.error(f"Failed to enrich {lead.businessName}: {e}")
 
             if i % 10 == 0:
                 logger.info(f"Enrichment progress: {i}/{total}")

@@ -39,16 +39,6 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return base
 
 
-def get_db_url() -> str:
-    """Build PostgreSQL connection URL from env vars."""
-    host = os.getenv("DB_HOST", "localhost")
-    port = os.getenv("DB_PORT", "5432")
-    name = os.getenv("DB_NAME", "leadscraper")
-    user = os.getenv("DB_USER", "postgres")
-    password = os.getenv("DB_PASSWORD", "")
-    return f"postgresql://{user}:{password}@{host}:{port}/{name}"
-
-
 # Scraper settings from env
 MAX_CONCURRENT = int(os.getenv("MAX_CONCURRENT_REQUESTS", "5"))
 REQUEST_DELAY = float(os.getenv("REQUEST_DELAY_SECONDS", "2"))

@@ -26,6 +26,9 @@ exports/
 .idea/
 *.swp
 
+# Prisma
+prisma/migrations/
+
 # OS
 .DS_Store
 Thumbs.db

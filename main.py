@@ -7,9 +7,10 @@ Usage:
     python main.py enrich                  # Enrich unenriched leads
     python main.py export --format csv     # Export leads
     python main.py stats                   # Show database stats
-    python main.py init-db                 # Initialize database tables
+    python main.py init-db                 # Initialize database (run prisma migrate)
 """
 
+import asyncio
 import click
 import logging
 
@@ -39,7 +40,7 @@ def run(ctx):
 
     engine = ScraperEngine(ctx.obj["config"])
     click.echo("Starting full scraping pipeline...")
-    results = engine.run()
+    results = asyncio.run(engine.run())
 
     click.echo("\n--- Results ---")
     click.echo(f"  Leads found:    {results['total_found']}")
@@ -63,7 +64,7 @@ def scrape(ctx, source, category, location, pages):
 
     engine = ScraperEngine(ctx.obj["config"])
     click.echo(f"Scraping {source} for '{category}' in {location}...")
-    stats = engine.scrape_single_source(source, category, location, pages)
+    stats = asyncio.run(engine.scrape_single_source(source, category, location, pages))
 
     click.echo(f"\n  Found: {stats['found']} | New: {stats['new']} | Updated: {stats['updated']}")
     if stats.get("error"):
@@ -79,7 +80,7 @@ def enrich(ctx, limit):
 
     engine = ScraperEngine(ctx.obj["config"])
     click.echo(f"Enriching up to {limit} leads...")
-    results = engine.enrich_only(limit=limit)
+    results = asyncio.run(engine.enrich_only(limit=limit))
 
     click.echo(f"\n  Total: {results['total']} | Success: {results['success']} | Failed: {results['failed']}")
 
@@ -96,14 +97,14 @@ def export(ctx, format, output, state, category, min_quality, enriched_only):
     """Export leads to CSV or JSON."""
     from src.utils.export import export_leads
 
-    filepath = export_leads(
+    filepath = asyncio.run(export_leads(
         format=format,
         output_dir=output,
         state=state,
         category=category,
         min_quality=min_quality,
         enriched_only=enriched_only,
-    )
+    ))
     if filepath:
         click.echo(f"Exported to: {filepath}")
     else:
@@ -114,14 +115,17 @@ def export(ctx, format, output, state, category, min_quality, enriched_only):
 @click.pass_context
 def stats(ctx):
     """Show database statistics."""
-    from src.database.connection import get_session, init_db
-    from src.database.repository import LeadRepository
+    async def _stats():
+        from src.database.connection import get_client, disconnect
+        from src.database.repository import LeadRepository
 
-    init_db()
-    session = get_session()
-    repo = LeadRepository(session)
-    data = repo.get_stats()
-    session.close()
+        db = await get_client()
+        repo = LeadRepository(db)
+        data = await repo.get_stats()
+        await disconnect()
+        return data
+
+    data = asyncio.run(_stats())
 
     click.echo("\n--- Lead Database Stats ---")
     click.echo(f"  Total leads:       {data['total_leads']}")
@@ -143,12 +147,24 @@ def stats(ctx):
 @cli.command("init-db")
 @click.pass_context
 def init_database(ctx):
-    """Initialize database tables."""
-    from src.database.connection import init_db
+    """Push Prisma schema to database (creates/updates tables)."""
+    import subprocess
+    import sys
 
-    click.echo("Initializing database...")
-    init_db()
-    click.echo("Database tables created successfully.")
+    click.echo("Pushing Prisma schema to database...")
+    prisma_bin = f"{sys.prefix}/bin/prisma" if "bin/prisma" in str(sys.prefix) else "prisma"
+    # Use python -m prisma for reliability
+    result = subprocess.run(
+        [sys.executable, "-m", "prisma", "db", "push"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        click.echo("Database schema synced successfully.")
+        click.echo(result.stdout)
+    else:
+        click.echo(f"Error: {result.stderr}")
+        raise SystemExit(1)
 
 
 @cli.command()
@@ -173,8 +189,8 @@ def schedule(ctx):
     engine = ScraperEngine(ctx.obj["config"])
 
     def job():
-        click.echo(f"Running scheduled scrape...")
-        results = engine.run()
+        click.echo("Running scheduled scrape...")
+        results = asyncio.run(engine.run())
         click.echo(f"Scheduled run complete: {results['total_new']} new leads")
 
     sched.every(interval).hours.at(start_time).do(job)

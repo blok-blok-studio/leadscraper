@@ -10,7 +10,6 @@ from urllib.parse import quote_plus
 from bs4 import BeautifulSoup
 
 from src.enrichment.base import BaseEnricher
-from src.database.models import Lead
 from src.scrapers.http_client import ScraperHttpClient
 
 logger = logging.getLogger(__name__)
@@ -24,7 +23,7 @@ class ReviewsEnricher(BaseEnricher):
     def __init__(self):
         self.http = ScraperHttpClient()
 
-    def enrich(self, lead: Lead) -> dict:
+    def enrich(self, lead) -> dict:
         result = {}
 
         # Try Google Business Profile
@@ -33,22 +32,22 @@ class ReviewsEnricher(BaseEnricher):
             result.update(google_data)
 
         # Try Yelp search
-        if not lead.yelp_rating:
+        if not lead.yelpRating:
             yelp_data = self._search_yelp(lead)
             if yelp_data:
                 result.update(yelp_data)
 
         return result
 
-    def _search_google_business(self, lead: Lead) -> dict:
+    def _search_google_business(self, lead) -> dict:
         """Search for the business on Google to find its Business Profile data."""
-        query = f"{lead.business_name} {lead.city} {lead.state}"
+        query = f"{lead.businessName} {lead.city} {lead.state}"
         search_url = f"https://www.google.com/search?q={quote_plus(query)}"
 
         try:
             soup = self.http.get_soup(search_url)
         except Exception as e:
-            logger.debug(f"[Reviews] Google search failed for {lead.business_name}: {e}")
+            logger.debug(f"[Reviews] Google search failed for {lead.businessName}: {e}")
             return {}
 
         result = {}
@@ -74,16 +73,16 @@ class ReviewsEnricher(BaseEnricher):
 
         return result
 
-    def _search_yelp(self, lead: Lead) -> dict:
+    def _search_yelp(self, lead) -> dict:
         """Search for the business on Yelp."""
-        query = quote_plus(lead.business_name)
+        query = quote_plus(lead.businessName)
         location = quote_plus(f"{lead.city}, {lead.state}")
         url = f"https://www.yelp.com/search?find_desc={query}&find_loc={location}"
 
         try:
             soup = self.http.get_soup(url)
         except Exception as e:
-            logger.debug(f"[Reviews] Yelp search failed for {lead.business_name}: {e}")
+            logger.debug(f"[Reviews] Yelp search failed for {lead.businessName}: {e}")
             return {}
 
         result = {}
@@ -98,7 +97,7 @@ class ReviewsEnricher(BaseEnricher):
                     for item in items:
                         biz = item.get("item", {})
                         biz_name = biz.get("name", "")
-                        if self._names_match(biz_name, lead.business_name):
+                        if self._names_match(biz_name, lead.businessName):
                             rating_data = biz.get("aggregateRating", {})
                             if rating_data:
                                 result["yelp_rating"] = float(

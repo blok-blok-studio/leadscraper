@@ -8,7 +8,6 @@ import re
 from bs4 import BeautifulSoup
 
 from src.enrichment.base import BaseEnricher
-from src.database.models import Lead
 from src.scrapers.http_client import ScraperHttpClient
 
 logger = logging.getLogger(__name__)
@@ -42,7 +41,7 @@ class ContactEnricher(BaseEnricher):
     def __init__(self):
         self.http = ScraperHttpClient()
 
-    def enrich(self, lead: Lead) -> dict:
+    def enrich(self, lead) -> dict:
         if not lead.website:
             return {}
 
@@ -79,7 +78,7 @@ class ContactEnricher(BaseEnricher):
 
         return result
 
-    def _extract_emails(self, soup: BeautifulSoup, lead: Lead) -> dict:
+    def _extract_emails(self, soup: BeautifulSoup, lead) -> dict:
         """Extract email addresses from page content."""
         result = {}
         page_text = soup.get_text()

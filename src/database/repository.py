@@ -1,41 +1,43 @@
-"""Data access layer for lead operations."""
+"""Data access layer for lead operations using Prisma."""
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
-from typing import Optional
 
-from sqlalchemy import and_, func
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.orm import Session
+from prisma import Prisma
+from prisma.models import Lead, ScrapeJob
 
-from src.database.models import Lead, ScrapeJob
+from src.database.models import to_prisma_data
+
+logger = logging.getLogger(__name__)
 
 
 class LeadRepository:
     """CRUD operations for leads."""
 
-    def __init__(self, session: Session):
-        self.session = session
+    def __init__(self, client: Prisma):
+        self.db = client
 
-    def upsert_lead(self, lead_data: dict) -> tuple[Lead, bool]:
+    async def upsert_lead(self, lead_data: dict) -> tuple:
         """Insert or update a lead. Returns (lead, is_new)."""
-        existing = self._find_duplicate(lead_data)
+        existing = await self._find_duplicate(lead_data)
+        prisma_data = to_prisma_data(lead_data)
 
         if existing:
-            for key, value in lead_data.items():
-                if value is not None and hasattr(existing, key):
-                    setattr(existing, key, value)
-            existing.updated_at = datetime.now(timezone.utc)
-            self.session.flush()
-            return existing, False
+            # Update existing lead with new data
+            update_data = {k: v for k, v in prisma_data.items() if v is not None}
+            update_data.pop("businessName", None)  # Don't overwrite name
+            lead = await self.db.lead.update(
+                where={"id": existing.id},
+                data=update_data,
+            )
+            return lead, False
 
-        lead = Lead(**lead_data)
-        self.session.add(lead)
-        self.session.flush()
+        lead = await self.db.lead.create(data=prisma_data)
         return lead, True
 
-    def _find_duplicate(self, lead_data: dict) -> Optional[Lead]:
+    async def _find_duplicate(self, lead_data: dict):
         """Check for duplicate lead by phone, email, or name+address."""
         phone = lead_data.get("phone")
         email = lead_data.get("email")
@@ -45,130 +47,153 @@ class LeadRepository:
         state = lead_data.get("state")
 
         if phone:
-            match = self.session.query(Lead).filter(Lead.phone == phone).first()
+            match = await self.db.lead.find_first(where={"phone": phone})
             if match:
                 return match
 
         if email:
-            match = self.session.query(Lead).filter(Lead.email == email).first()
+            match = await self.db.lead.find_first(where={"email": email})
             if match:
                 return match
 
         if name and address and city and state:
-            match = (
-                self.session.query(Lead)
-                .filter(
-                    and_(
-                        func.lower(Lead.business_name) == name.lower(),
-                        func.lower(Lead.address) == address.lower(),
-                        func.lower(Lead.city) == city.lower(),
-                        Lead.state == state.upper(),
-                    )
-                )
-                .first()
+            match = await self.db.lead.find_first(
+                where={
+                    "businessName": {"equals": name, "mode": "insensitive"},
+                    "address": {"equals": address, "mode": "insensitive"},
+                    "city": {"equals": city, "mode": "insensitive"},
+                    "state": state.upper(),
+                }
             )
             if match:
                 return match
 
         return None
 
-    def get_unenriched_leads(self, limit: int = 100) -> list[Lead]:
+    async def get_unenriched_leads(self, limit: int = 100):
         """Get leads that haven't been enriched yet."""
-        return (
-            self.session.query(Lead)
-            .filter(Lead.is_enriched == False)
-            .order_by(Lead.scraped_at.desc())
-            .limit(limit)
-            .all()
+        return await self.db.lead.find_many(
+            where={"isEnriched": False},
+            order={"scrapedAt": "desc"},
+            take=limit,
         )
 
-    def get_leads_by_location(self, state: str, city: str = None) -> list[Lead]:
+    async def get_leads_by_location(self, state: str, city: str = None):
         """Get all leads for a given state/city."""
-        query = self.session.query(Lead).filter(Lead.state == state.upper())
+        where = {"state": state.upper()}
         if city:
-            query = query.filter(func.lower(Lead.city) == city.lower())
-        return query.all()
+            where["city"] = {"equals": city, "mode": "insensitive"}
+        return await self.db.lead.find_many(where=where)
 
-    def get_leads_by_category(self, category: str) -> list[Lead]:
+    async def get_leads_by_category(self, category: str):
         """Get all leads for a given category."""
-        return (
-            self.session.query(Lead)
-            .filter(func.lower(Lead.category) == category.lower())
-            .all()
+        return await self.db.lead.find_many(
+            where={"category": {"equals": category, "mode": "insensitive"}}
         )
 
-    def get_lead_count(self) -> int:
+    async def get_lead_count(self) -> int:
         """Get total number of leads."""
-        return self.session.query(func.count(Lead.id)).scalar()
+        return await self.db.lead.count()
 
-    def get_stats(self) -> dict:
+    async def get_stats(self) -> dict:
         """Get summary statistics."""
-        total = self.get_lead_count()
-        enriched = (
-            self.session.query(func.count(Lead.id))
-            .filter(Lead.is_enriched == True)
-            .scalar()
+        total = await self.db.lead.count()
+        enriched = await self.db.lead.count(where={"isEnriched": True})
+
+        # Top states via raw query
+        by_state = await self.db.query_raw(
+            """
+            SELECT state, COUNT(*)::int as count
+            FROM leads
+            WHERE state IS NOT NULL
+            GROUP BY state
+            ORDER BY count DESC
+            LIMIT 10
+            """
         )
-        by_state = (
-            self.session.query(Lead.state, func.count(Lead.id))
-            .group_by(Lead.state)
-            .order_by(func.count(Lead.id).desc())
-            .limit(10)
-            .all()
+
+        # Top categories via raw query
+        by_category = await self.db.query_raw(
+            """
+            SELECT category, COUNT(*)::int as count
+            FROM leads
+            WHERE category IS NOT NULL AND category != ''
+            GROUP BY category
+            ORDER BY count DESC
+            LIMIT 10
+            """
         )
-        by_category = (
-            self.session.query(Lead.category, func.count(Lead.id))
-            .group_by(Lead.category)
-            .order_by(func.count(Lead.id).desc())
-            .limit(10)
-            .all()
+
+        # Average quality score
+        avg_result = await self.db.query_raw(
+            "SELECT COALESCE(AVG(quality_score), 0)::float as avg_score FROM leads"
         )
-        avg_quality = (
-            self.session.query(func.avg(Lead.quality_score)).scalar() or 0
-        )
+        avg_quality = avg_result[0]["avg_score"] if avg_result else 0
 
         return {
             "total_leads": total,
             "enriched_leads": enriched,
             "unenriched_leads": total - enriched,
             "avg_quality_score": round(float(avg_quality), 1),
-            "top_states": [{"state": s, "count": c} for s, c in by_state],
-            "top_categories": [{"category": c, "count": n} for c, n in by_category],
+            "top_states": [{"state": r["state"], "count": r["count"]} for r in by_state],
+            "top_categories": [{"category": r["category"], "count": r["count"]} for r in by_category],
         }
+
+    async def update_lead(self, lead_id: int, data: dict):
+        """Update a lead by ID with a dict of camelCase fields."""
+        return await self.db.lead.update(where={"id": lead_id}, data=data)
 
 
 class JobRepository:
     """CRUD operations for scrape jobs."""
 
-    def __init__(self, session: Session):
-        self.session = session
+    def __init__(self, client: Prisma):
+        self.db = client
 
-    def create_job(self, source: str, category: str, location: str) -> ScrapeJob:
+    async def create_job(self, source: str, category: str, location: str):
         """Create a new scrape job record."""
-        job = ScrapeJob(source=source, category=category, location=location)
-        self.session.add(job)
-        self.session.flush()
-        return job
+        return await self.db.scrapejob.create(
+            data={
+                "source": source,
+                "category": category,
+                "location": location,
+                "status": "running",
+            }
+        )
 
-    def complete_job(self, job: ScrapeJob, leads_found: int, leads_new: int,
-                     leads_updated: int, leads_skipped: int, errors: str = None):
+    async def complete_job(self, job_id: int, leads_found: int, leads_new: int,
+                           leads_updated: int, leads_skipped: int, errors: str = None):
         """Mark a job as completed."""
         now = datetime.now(timezone.utc)
-        job.status = "completed"
-        job.leads_found = leads_found
-        job.leads_new = leads_new
-        job.leads_updated = leads_updated
-        job.leads_skipped = leads_skipped
-        job.errors = errors
-        job.completed_at = now
-        job.duration_seconds = (now - job.started_at).total_seconds()
-        self.session.flush()
+        job = await self.db.scrapejob.find_unique(where={"id": job_id})
+        duration = (now - job.startedAt).total_seconds() if job else 0
 
-    def fail_job(self, job: ScrapeJob, error: str):
+        return await self.db.scrapejob.update(
+            where={"id": job_id},
+            data={
+                "status": "completed",
+                "leadsFound": leads_found,
+                "leadsNew": leads_new,
+                "leadsUpdated": leads_updated,
+                "leadsSkipped": leads_skipped,
+                "errors": errors,
+                "completedAt": now,
+                "durationSeconds": duration,
+            },
+        )
+
+    async def fail_job(self, job_id: int, error: str):
         """Mark a job as failed."""
         now = datetime.now(timezone.utc)
-        job.status = "failed"
-        job.errors = error
-        job.completed_at = now
-        job.duration_seconds = (now - job.started_at).total_seconds()
-        self.session.flush()
+        job = await self.db.scrapejob.find_unique(where={"id": job_id})
+        duration = (now - job.startedAt).total_seconds() if job else 0
+
+        return await self.db.scrapejob.update(
+            where={"id": job_id},
+            data={
+                "status": "failed",
+                "errors": error,
+                "completedAt": now,
+                "durationSeconds": duration,
+            },
+        )

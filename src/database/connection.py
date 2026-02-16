@@ -1,46 +1,24 @@
-"""Database connection and session management."""
+"""Prisma database client management."""
 
 from __future__ import annotations
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from prisma import Prisma
 
-from src.config import get_db_url
-from src.database.models import Base
-
-_engine = None
-_SessionFactory = None
+_client: Prisma | None = None
 
 
-def get_engine():
-    """Get or create the database engine."""
-    global _engine
-    if _engine is None:
-        _engine = create_engine(
-            get_db_url(),
-            pool_size=10,
-            max_overflow=20,
-            pool_pre_ping=True,
-            echo=False,
-        )
-    return _engine
+async def get_client() -> Prisma:
+    """Get or create the Prisma client (connects on first call)."""
+    global _client
+    if _client is None or not _client.is_connected():
+        _client = Prisma()
+        await _client.connect()
+    return _client
 
 
-def get_session() -> Session:
-    """Create a new database session."""
-    global _SessionFactory
-    if _SessionFactory is None:
-        _SessionFactory = sessionmaker(bind=get_engine())
-    return _SessionFactory()
-
-
-def init_db():
-    """Create all tables if they don't exist."""
-    engine = get_engine()
-    Base.metadata.create_all(engine)
-
-
-def drop_db():
-    """Drop all tables. Use with caution."""
-    engine = get_engine()
-    Base.metadata.drop_all(engine)
+async def disconnect():
+    """Disconnect the Prisma client."""
+    global _client
+    if _client is not None and _client.is_connected():
+        await _client.disconnect()
+        _client = None

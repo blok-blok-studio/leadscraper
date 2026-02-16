@@ -4,17 +4,18 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
-from src.database.connection import get_session
-from src.database.models import Lead
+from src.database.connection import get_client, disconnect
+from src.database.models import to_snake_dict
 
 logger = logging.getLogger(__name__)
 
 
-def export_leads(
+async def export_leads(
     format: str = "csv",
     output_dir: str = "exports",
     state: str = None,
@@ -27,42 +28,41 @@ def export_leads(
 
     Returns the output file path.
     """
-    session = get_session()
-    query = session.query(Lead)
+    db = await get_client()
 
+    # Build where clause
+    where = {}
     if state:
-        query = query.filter(Lead.state == state.upper())
+        where["state"] = state.upper()
     if category:
-        from sqlalchemy import func
-        query = query.filter(func.lower(Lead.category) == category.lower())
+        where["category"] = {"equals": category, "mode": "insensitive"}
     if min_quality > 0:
-        query = query.filter(Lead.quality_score >= min_quality)
+        where["qualityScore"] = {"gte": min_quality}
     if enriched_only:
-        query = query.filter(Lead.is_enriched == True)
+        where["isEnriched"] = True
 
-    leads = query.all()
-    session.close()
+    leads = await db.lead.find_many(where=where if where else None)
+    await disconnect()
 
     if not leads:
         logger.warning("No leads found matching export criteria")
         return ""
 
-    # Convert to list of dicts
+    # Convert to list of snake_case dicts
     records = []
     for lead in leads:
-        record = {c.name: getattr(lead, c.name) for c in lead.__table__.columns}
+        record = to_snake_dict(lead)
         # Serialize complex types
-        if record.get("tech_stack"):
+        if record.get("tech_stack") and isinstance(record["tech_stack"], dict):
             record["tech_stack"] = json.dumps(record["tech_stack"])
-        if record.get("industry_tags"):
-            record["industry_tags"] = ", ".join(record["industry_tags"] or [])
+        if record.get("industry_tags") and isinstance(record["industry_tags"], list):
+            record["industry_tags"] = ", ".join(record["industry_tags"])
         records.append(record)
 
     # Create output directory
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    from datetime import datetime
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     if format.lower() == "csv":

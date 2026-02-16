@@ -6,7 +6,6 @@ import logging
 import re
 
 from src.enrichment.base import BaseEnricher
-from src.database.models import Lead
 from src.scrapers.http_client import ScraperHttpClient
 
 logger = logging.getLogger(__name__)
@@ -52,7 +51,7 @@ class SocialMediaEnricher(BaseEnricher):
     def __init__(self):
         self.http = ScraperHttpClient()
 
-    def enrich(self, lead: Lead) -> dict:
+    def enrich(self, lead) -> dict:
         if not lead.website:
             return {}
 
@@ -77,7 +76,7 @@ class SocialMediaEnricher(BaseEnricher):
 
         if result:
             logger.debug(
-                f"[Social] Found {len(result)} social links for {lead.business_name}"
+                f"[Social] Found {len(result)} social links for {lead.businessName}"
             )
 
         return result
