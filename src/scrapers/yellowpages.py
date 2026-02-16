@@ -36,7 +36,7 @@ class YellowPagesScraper(BaseScraper):
         return leads
 
     def _scrape_page(self, category: str, location: str, page: int) -> list[dict]:
-        """Scrape a single results page."""
+        """Scrape a single results page using Playwright for JS rendering."""
         url = f"{self.BASE_URL}/search"
         params = {
             "search_terms": category,
@@ -44,12 +44,22 @@ class YellowPagesScraper(BaseScraper):
             "page": page,
         }
 
-        soup = self.http.get_soup(url, params=params)
-        results = soup.select("div.result")
+        # Use Playwright browser rendering to bypass anti-bot protection
+        soup = self.http.get_rendered_soup(
+            url,
+            params=params,
+            wait_selector="li.business-card, section.info",
+            wait_ms=4000,
+        )
+
+        # Primary selector: each listing is an <li class="business-card">
+        results = soup.select("li.business-card")
 
         if not results:
-            results = soup.select("div.search-results div.v-card")
+            # Fallback to older selectors
+            results = soup.select("div.result, div.v-card, div.srp-listing")
 
+        # Filter out sponsored-only cards that lack real data
         leads = []
         for card in results:
             try:
@@ -64,72 +74,106 @@ class YellowPagesScraper(BaseScraper):
 
     def _parse_listing(self, card) -> dict | None:
         """Parse a single business listing card."""
-        # Business name
-        name_el = card.select_one("a.business-name, h2.n a, .info-section h2 a")
+        # Business name — <h2 class="title business-name"> (may or may not contain <a>)
+        name_el = card.select_one(
+            "h2.business-name a, h2.title a, "
+            "h2.business-name, h2.title, "
+            "span.business-name, a.business-name, "
+            "h2.n a, .info h2 a, .info h2"
+        )
         if not name_el:
             return None
         name = name_el.get_text(strip=True)
+        # Strip leading numbers like "1." or "2."
+        name = re.sub(r"^\d+\.\s*", "", name).strip()
+        if not name:
+            return None
 
-        # Phone
-        phone_el = card.select_one("div.phones, .phone, .info-section .phone")
-        phone = phone_el.get_text(strip=True) if phone_el else None
+        # Phone — look for tel: links or phone pattern in text
+        phone = None
+        phone_el = card.select_one("a[href^='tel:'], div.phones, .phone")
+        if phone_el:
+            if phone_el.get("href", "").startswith("tel:"):
+                phone = phone_el["href"].replace("tel:", "").strip()
+            else:
+                phone = phone_el.get_text(strip=True)
+        if not phone:
+            # Regex fallback: find phone number pattern in card text
+            card_text = card.get_text()
+            phone_match = re.search(r'\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}', card_text)
+            if phone_match:
+                phone = phone_match.group(0)
 
-        # Address
+        # Address — <article class="address-indicators"> or <article class="address">
         address = ""
         city = ""
         state = ""
         zip_code = ""
 
-        street_el = card.select_one("div.street-address, .adr .street-address")
-        if street_el:
-            address = street_el.get_text(strip=True)
-
-        locality_el = card.select_one("div.locality, .adr .locality")
-        if locality_el:
-            loc_text = locality_el.get_text(strip=True)
-            # Parse "City, ST ZIP"
-            match = re.match(r"(.+?),\s*([A-Z]{2})\s*(\d{5})?", loc_text)
+        addr_el = card.select_one(
+            "article.address-indicators, article.address, "
+            "div.street-address, .adr"
+        )
+        if addr_el:
+            addr_text = addr_el.get_text(separator=", ", strip=True)
+            # Try pattern: "Street, City, ST ZIP" or "Street City, ST"
+            match = re.match(
+                r"(.+?),\s*(.+?),\s*([A-Z]{2})\s*(\d{5})?",
+                addr_text
+            )
             if match:
-                city = match.group(1)
-                state = match.group(2)
-                zip_code = match.group(3) or ""
+                address = match.group(1).strip()
+                city = match.group(2).strip()
+                state = match.group(3).strip()
+                zip_code = (match.group(4) or "").strip()
+            else:
+                # Try "Street City, ST" (no comma between street and city)
+                match2 = re.match(r"(.+?),?\s+([A-Z]{2})\s*(\d{5})?$", addr_text)
+                if match2:
+                    address = match2.group(1).strip()
+                    state = match2.group(2).strip()
+                    zip_code = (match2.group(3) or "").strip()
 
-        # Website
+        # Website — <a class="website listing-cta action">
         website = None
-        website_el = card.select_one("a.track-visit-website, a[href*='website']")
+        website_el = card.select_one(
+            "a.website, a.track-visit-website, "
+            "a[class*='website']"
+        )
         if website_el:
-            website = website_el.get("href", "")
-            if website.startswith("/"):
-                website = None
+            href = website_el.get("href", "")
+            if href and not href.startswith("/") and "yellowpages.com" not in href:
+                website = href
 
-        # Category
-        categories_el = card.select_one("div.categories, .info-section .categories")
-        category_text = categories_el.get_text(strip=True) if categories_el else ""
+        # Category — look for category links or text
+        category_text = ""
+        cat_els = card.select("a[href*='/category/'], div.categories a, p.indicators a")
+        if cat_els:
+            category_text = ", ".join(
+                el.get_text(strip=True) for el in cat_els
+                if el.get_text(strip=True) and "Yellow Pages" not in el.get_text()
+            )
 
-        # Source URL
-        link_el = card.select_one("a.business-name, h2.n a")
+        # Source URL — link to the business detail page
         source_url = ""
+        link_el = card.select_one("h2.title a, h2.business-name a, a.business-name")
         if link_el and link_el.get("href"):
             href = link_el["href"]
             source_url = href if href.startswith("http") else f"{self.BASE_URL}{href}"
-
-        # Rating
-        rating = None
-        rating_el = card.select_one("div.ratings .result-rating, .rating-count")
-        if rating_el:
-            rating_class = rating_el.get("class", [])
-            for cls in rating_class:
-                match = re.search(r"(\d+)", cls)
-                if match:
-                    rating = int(match.group(1)) / 2  # Convert to 5-star scale
-                    break
+        if not source_url:
+            # Try any link that goes to a YP detail page
+            detail_link = card.select_one("a[href*='/mip/']")
+            if detail_link and detail_link.get("href"):
+                href = detail_link["href"]
+                source_url = href if href.startswith("http") else f"{self.BASE_URL}{href}"
 
         # Years in business
         year_established = None
         years_el = card.select_one(".years-in-business .count, .yib")
         if years_el:
             try:
-                years = int(re.sub(r"\D", "", years_el.get_text()))
+                years_text = years_el.get_text(strip=True)
+                years = int(re.sub(r"\D", "", years_text))
                 from datetime import datetime
                 year_established = datetime.now().year - years
             except (ValueError, TypeError):

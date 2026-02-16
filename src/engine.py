@@ -79,6 +79,7 @@ class ScraperEngine:
 
         stats = {"found": 0, "new": 0, "updated": 0, "skipped": 0, "error": None}
 
+        scraper = None
         try:
             scraper = get_scraper(source_name)
             leads = scraper.scrape(category, location, max_pages)
@@ -111,6 +112,13 @@ class ScraperEngine:
             logger.error(error_msg)
             stats["error"] = error_msg
             await job_repo.fail_job(job.id, str(e))
+        finally:
+            # Close scraper to free Playwright browser resources
+            if scraper:
+                try:
+                    scraper.close()
+                except Exception:
+                    pass
 
         return stats
 

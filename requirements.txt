@@ -35,3 +35,6 @@ rich>=13.7.0
 
 # CLI
 click>=8.1.0
+
+# Browser rendering (anti-bot bypass)
+playwright>=1.48.0

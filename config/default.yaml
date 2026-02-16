@@ -22,10 +22,13 @@ targeting:
 
 scraping:
   # Sources to scrape (in priority order)
+  # NOTE: yellowpages is the primary working source (Playwright renders JS).
+  # yelp and bbb have aggressive bot detection — they may require
+  # residential proxies (PROXY_URL in .env) to work reliably.
   sources:
     - yellowpages
-    - bbb
-    - yelp
+    # - bbb    # Requires proxy — blocked without it
+    # - yelp   # Requires proxy — blocked without it
   # Max leads per category per location
   max_leads_per_search: 100
   # Pages to scrape per search
