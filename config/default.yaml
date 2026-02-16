@@ -1,0 +1,63 @@
+# Lead Scraper Configuration
+# Target: US Local Businesses
+
+targeting:
+  country: US
+  # Specify states (leave empty for all US states)
+  states: []
+  # Specify cities (leave empty for state-wide)
+  cities: []
+  # Target industries/categories
+  categories:
+    - restaurants
+    - plumbers
+    - electricians
+    - dentists
+    - lawyers
+    - real estate agents
+    - auto repair
+    - salons
+    - gyms
+    - accountants
+
+scraping:
+  # Sources to scrape (in priority order)
+  sources:
+    - yellowpages
+    - bbb
+    - yelp
+  # Max leads per category per location
+  max_leads_per_search: 100
+  # Pages to scrape per search
+  max_pages_per_search: 5
+
+enrichment:
+  enabled: true
+  # Which enrichment modules to run
+  modules:
+    - website_tech_stack
+    - social_media
+    - contact_enrichment
+    - reviews_ratings
+  # Timeout for enrichment requests (seconds)
+  timeout: 15
+
+deduplication:
+  enabled: true
+  # Fields to match for deduplication
+  match_fields:
+    - phone
+    - email
+    - name_and_address
+
+export:
+  # Auto-export after scraping
+  enabled: false
+  format: csv  # csv, json
+  output_dir: exports/
+
+scheduling:
+  enabled: false
+  # Cron-style: run daily at 2 AM
+  interval_hours: 24
+  start_time: "02:00"
