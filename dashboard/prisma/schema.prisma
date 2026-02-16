@@ -1,0 +1,105 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Lead {
+  id Int @id @default(autoincrement())
+
+  // Basic info
+  businessName String  @map("business_name") @db.VarChar(500)
+  phone        String? @db.VarChar(20)
+  email        String? @db.VarChar(255)
+  website      String? @db.VarChar(500)
+  address      String? @db.VarChar(500)
+  city         String? @db.VarChar(100)
+  state        String? @db.VarChar(2)
+  zipCode      String? @map("zip_code") @db.VarChar(10)
+  country      String  @default("US") @db.VarChar(2)
+
+  // Industry / category
+  category     String?  @db.VarChar(200)
+  subcategory  String?  @db.VarChar(200)
+  industryTags String[] @default([]) @map("industry_tags")
+
+  // Owner / decision maker
+  ownerName     String? @map("owner_name") @db.VarChar(255)
+  ownerTitle    String? @map("owner_title") @db.VarChar(200)
+  ownerEmail    String? @map("owner_email") @db.VarChar(255)
+  ownerPhone    String? @map("owner_phone") @db.VarChar(20)
+  ownerLinkedin String? @map("owner_linkedin") @db.VarChar(500)
+
+  // Business details
+  employeeCount         String? @map("employee_count") @db.VarChar(50)
+  annualRevenueEstimate String? @map("annual_revenue_estimate") @db.VarChar(100)
+  yearEstablished       Int?    @map("year_established")
+  businessType          String? @map("business_type") @db.VarChar(100)
+
+  // Online presence
+  facebookUrl  String? @map("facebook_url") @db.VarChar(500)
+  instagramUrl String? @map("instagram_url") @db.VarChar(500)
+  twitterUrl   String? @map("twitter_url") @db.VarChar(500)
+  linkedinUrl  String? @map("linkedin_url") @db.VarChar(500)
+  youtubeUrl   String? @map("youtube_url") @db.VarChar(500)
+  tiktokUrl    String? @map("tiktok_url") @db.VarChar(500)
+
+  // Tech stack (from website analysis)
+  techStack       Json?    @default("{}") @map("tech_stack")
+  hasWebsite      Boolean  @default(false) @map("has_website")
+  websitePlatform String?  @map("website_platform") @db.VarChar(100)
+  hasSsl          Boolean? @map("has_ssl")
+  mobileFriendly  Boolean? @map("mobile_friendly")
+
+  // Reviews / ratings
+  googleRating      Float?   @map("google_rating")
+  googleReviewCount Int?     @map("google_review_count")
+  yelpRating        Float?   @map("yelp_rating")
+  yelpReviewCount   Int?     @map("yelp_review_count")
+  bbbRating         String?  @map("bbb_rating") @db.VarChar(10)
+  bbbAccredited     Boolean? @map("bbb_accredited")
+
+  // Ad spend indicators
+  runsGoogleAds            Boolean? @map("runs_google_ads")
+  runsFacebookAds          Boolean? @map("runs_facebook_ads")
+  hasGoogleBusinessProfile Boolean? @map("has_google_business_profile")
+
+  // Meta
+  source           String    @db.VarChar(100)
+  sourceUrl        String?   @map("source_url") @db.VarChar(1000)
+  scrapedAt        DateTime  @default(now()) @map("scraped_at")
+  enrichedAt       DateTime? @map("enriched_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  isEnriched       Boolean   @default(false) @map("is_enriched")
+  enrichmentErrors String?   @map("enrichment_errors") @db.Text
+  qualityScore     Int       @default(0) @map("quality_score")
+
+  @@unique([businessName, address, city, state], name: "uq_lead_identity")
+  @@index([phone])
+  @@index([email])
+  @@index([state, city, zipCode], name: "ix_leads_location")
+  @@index([category])
+  @@index([qualityScore, isEnriched], name: "ix_leads_quality")
+  @@map("leads")
+}
+
+model ScrapeJob {
+  id              Int       @id @default(autoincrement())
+  status          String    @default("running") @db.VarChar(20)
+  source          String?   @db.VarChar(100)
+  category        String?   @db.VarChar(200)
+  location        String?   @db.VarChar(200)
+  leadsFound      Int       @default(0) @map("leads_found")
+  leadsNew        Int       @default(0) @map("leads_new")
+  leadsUpdated    Int       @default(0) @map("leads_updated")
+  leadsSkipped    Int       @default(0) @map("leads_skipped")
+  errors          String?   @db.Text
+  startedAt       DateTime  @default(now()) @map("started_at")
+  completedAt     DateTime? @map("completed_at")
+  durationSeconds Float?    @map("duration_seconds")
+
+  @@map("scrape_jobs")
+}

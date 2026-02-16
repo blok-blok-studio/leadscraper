@@ -20,6 +20,8 @@ exports/
 *.json
 !config/*.json
 !config/*.yaml
+!dashboard/*.json
+!dashboard/**/*.json
 
 # IDE
 .vscode/
@@ -28,6 +30,11 @@ exports/
 
 # Prisma
 prisma/migrations/
+
+# Dashboard
+dashboard/node_modules/
+dashboard/.next/
+dashboard/.env.local
 
 # OS
 .DS_Store
