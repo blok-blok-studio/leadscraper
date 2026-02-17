@@ -25,8 +25,11 @@ JUNK_DOMAINS = {
     "example.com", "domain.com", "email.com", "test.com",
     "sentry.io", "wixpress.com", "wordpress.com",
     "squarespace.com", "w3.org", "schema.org", "googleapis.com",
-    "google.com", "facebook.com", "twitter.com", "gstatic.com",
+    "google.com", "google.de", "google.co.uk", "google.ca",
+    "google.com.au", "google.co.in",
+    "facebook.com", "twitter.com", "gstatic.com",
     "sonsio.com", "shell.com",
+    "yelp.com", "bbb.org", "yellowpages.com",
 }
 
 # Generic prefixes we deprioritize — we want real people's emails
@@ -36,6 +39,16 @@ GENERIC_PREFIXES = {
     "general", "mail", "enquiries", "reception", "accounts",
     "customerservice", "cs", "orders", "noreply", "no-reply",
 }
+
+
+def _is_junk_email_domain(domain: str) -> bool:
+    """Check if an email domain is junk (Google, social media, platform, etc)."""
+    if domain in JUNK_DOMAINS:
+        return True
+    # Catch all Google country domains (google.de, google.fr, google.co.uk, etc)
+    if domain.startswith("google.") or ".google." in domain:
+        return True
+    return False
 
 
 def _is_personal_email(email: str) -> bool:
@@ -123,7 +136,7 @@ class EmailDiscoveryEnricher(BaseEnricher):
         for email in emails:
             email = email.lower()
             domain = email.split("@")[1] if "@" in email else ""
-            if domain not in JUNK_DOMAINS and len(email) < 50:
+            if not _is_junk_email_domain(domain) and len(email) < 50:
                 return email
 
         return None
@@ -160,7 +173,7 @@ class EmailDiscoveryEnricher(BaseEnricher):
             seen.add(email)
 
             domain = email.split("@")[1] if "@" in email else ""
-            if domain in JUNK_DOMAINS:
+            if _is_junk_email_domain(domain):
                 continue
             if len(email) > 50:
                 continue

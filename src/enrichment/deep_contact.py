@@ -48,7 +48,9 @@ JUNK_EMAIL_DOMAINS = {
     "squarespace.com", "godaddy.com", "weebly.com", "wix.com",
     "shopify.com", "googleapis.com", "gravatar.com", "w3.org",
     "schema.org", "facebook.com", "twitter.com", "instagram.com",
-    "cloudflare.com", "google.com", "gstatic.com", "jquery.com",
+    "cloudflare.com", "google.com", "google.de", "google.co.uk",
+    "google.ca", "google.com.au", "google.co.in",
+    "gstatic.com", "jquery.com",
     "bootstrapcdn.com", "jsdelivr.net", "unpkg.com", "cdnjs.com",
     "fontawesome.com", "sonsio.com", "shell.com",
 }
@@ -275,8 +277,8 @@ class DeepContactEnricher(BaseEnricher):
             local, domain = email.split("@", 1) if "@" in email else ("", "")
             if not local or not domain:
                 continue
-            # Skip junk domains
-            if domain in JUNK_EMAIL_DOMAINS:
+            # Skip junk domains (including all google.* country domains)
+            if domain in JUNK_EMAIL_DOMAINS or domain.startswith("google.") or ".google." in domain:
                 continue
             # Skip junk prefixes
             if local in JUNK_EMAIL_PREFIXES:

@@ -47,7 +47,10 @@ JUNK_EMAIL_DOMAINS = {
     "example.com", "domain.com", "email.com", "test.com",
     "sentry.io", "wixpress.com", "wordpress.com",
     "squarespace.com", "w3.org", "schema.org", "googleapis.com",
-    "google.com", "facebook.com", "twitter.com", "gstatic.com",
+    "google.com", "google.de", "google.co.uk", "google.ca",
+    "google.com.au", "google.co.in",
+    "facebook.com", "twitter.com", "gstatic.com",
+    "yelp.com", "bbb.org", "yellowpages.com",
 }
 
 # Generic email prefixes
@@ -224,7 +227,8 @@ class GoogleIntelEnricher(BaseEnricher):
             domain = email.split("@")[1] if "@" in email else ""
             local = email.split("@")[0]
 
-            if domain in JUNK_EMAIL_DOMAINS:
+            # Catch exact matches + any google.* country domain
+            if domain in JUNK_EMAIL_DOMAINS or domain.startswith("google.") or ".google." in domain:
                 continue
             if len(email) > 50:
                 continue
