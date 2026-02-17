@@ -2,9 +2,10 @@ import { prisma } from "@/lib/prisma";
 import { notFound } from "next/navigation";
 import { Header } from "@/components/layout/header";
 import { LeadDetailSections } from "@/components/leads/lead-detail-sections";
-import { qualityBadgeColor } from "@/lib/utils";
+import { qualityBadgeColor, icpBadgeColor, icpLabel } from "@/lib/utils";
 import Link from "next/link";
 import { ArrowLeft, CheckCircle, XCircle } from "lucide-react";
+import { DeleteLeadButton } from "@/components/leads/delete-lead-button";
 
 interface LeadDetailPageProps {
   params: Promise<{ id: string }>;
@@ -56,6 +57,12 @@ export default async function LeadDetailPage({ params }: LeadDetailPageProps) {
             Quality: {lead.qualityScore}/100
           </span>
           <span
+            className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${icpBadgeColor(lead.icpScore)}`}
+            title={`ICP Score: ${lead.icpScore}/100`}
+          >
+            ICP: {lead.icpScore} — {icpLabel(lead.icpScore)}
+          </span>
+          <span
             className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium ${
               lead.isEnriched
                 ? "bg-emerald-100 text-emerald-700"
@@ -69,6 +76,7 @@ export default async function LeadDetailPage({ params }: LeadDetailPageProps) {
             )}
             {lead.isEnriched ? "Enriched" : "Not Enriched"}
           </span>
+          <DeleteLeadButton leadId={lead.id} businessName={lead.businessName} />
         </div>
       </div>
 

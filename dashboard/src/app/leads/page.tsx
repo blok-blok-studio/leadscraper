@@ -64,6 +64,7 @@ export default async function LeadsPage({ searchParams }: LeadsPageProps) {
         state: true,
         category: true,
         qualityScore: true,
+        icpScore: true,
         isEnriched: true,
       },
       orderBy: { id: "desc" },

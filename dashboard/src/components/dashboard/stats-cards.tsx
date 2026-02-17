@@ -1,9 +1,10 @@
-import { Database, CheckCircle, TrendingUp, Globe } from "lucide-react";
+import { Database, CheckCircle, TrendingUp, Target, Globe } from "lucide-react";
 
 interface StatsCardsProps {
   totalLeads: number;
   enrichedLeads: number;
   avgQuality: number;
+  avgIcp: number;
   sourcesActive: number;
 }
 
@@ -27,6 +28,12 @@ const cards = [
     color: "text-amber-600 bg-amber-50",
   },
   {
+    key: "icp",
+    label: "Avg ICP Score",
+    icon: Target,
+    color: "text-violet-600 bg-violet-50",
+  },
+  {
     key: "sources",
     label: "Sources Active",
     icon: Globe,
@@ -38,8 +45,11 @@ export function StatsCards({
   totalLeads,
   enrichedLeads,
   avgQuality,
+  avgIcp,
   sourcesActive,
 }: StatsCardsProps) {
+  const icpLabel = avgIcp >= 70 ? "Hot" : avgIcp >= 40 ? "Warm" : avgIcp >= 20 ? "Cool" : "Cold";
+
   const values: Record<string, { value: string; subtitle: string }> = {
     total: {
       value: totalLeads.toLocaleString(),
@@ -53,6 +63,10 @@ export function StatsCards({
       value: `${avgQuality}`,
       subtitle: "out of 100",
     },
+    icp: {
+      value: `${avgIcp}`,
+      subtitle: `${icpLabel} — out of 100`,
+    },
     sources: {
       value: `${sourcesActive}`,
       subtitle: "unique sources",
@@ -60,7 +74,7 @@ export function StatsCards({
   };
 
   return (
-    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-5">
       {cards.map((card) => {
         const Icon = card.icon;
         const data = values[card.key];

@@ -7,31 +7,42 @@ import random
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, Future
+from urllib.parse import urlparse
 
 import httpx
 from fake_useragent import UserAgent
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
-from src.config import REQUEST_TIMEOUT, MAX_RETRIES, PROXY_URL, REQUEST_DELAY
+from src.config import REQUEST_TIMEOUT, MAX_RETRIES, PROXY_URL
 
 logger = logging.getLogger(__name__)
 
 _ua = UserAgent(fallback="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+
+# Domains that aggressively rate-limit scrapers — use slower delay
+SLOW_DOMAINS = {"google.com", "yelp.com", "bbb.org", "yellowpages.com"}
+SLOW_DELAY = 2.0    # seconds for search engines / directories
+FAST_DELAY = 0.5    # seconds for business websites
 
 
 class ScraperHttpClient:
     """HTTP client configured for web scraping with protections."""
 
     def __init__(self):
-        self._last_request_time = 0
+        self._domain_last_request: dict[str, float] = {}
+        self._lock = threading.Lock()
         proxies = PROXY_URL if PROXY_URL else None
         self.client = httpx.Client(
             timeout=REQUEST_TIMEOUT,
             follow_redirects=True,
             proxy=proxies,
-            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
         )
         self._browser_client: BrowserClient | None = None
+
+        # Response caches — same URL only fetched once per enrichment cycle
+        self._response_cache: dict[str, httpx.Response] = {}
+        self._soup_cache: dict[str, object] = {}  # BeautifulSoup objects
 
     def _get_headers(self) -> dict:
         """Generate realistic browser headers."""
@@ -45,13 +56,29 @@ class ScraperHttpClient:
             "Upgrade-Insecure-Requests": "1",
         }
 
-    def _rate_limit(self):
-        """Enforce minimum delay between requests."""
-        elapsed = time.time() - self._last_request_time
-        if elapsed < REQUEST_DELAY:
-            jitter = random.uniform(0, REQUEST_DELAY * 0.5)
-            time.sleep(REQUEST_DELAY - elapsed + jitter)
-        self._last_request_time = time.time()
+    def _rate_limit(self, url: str):
+        """Enforce minimum delay between requests to the same domain.
+
+        Uses aggressive delay for search engines/directories (Google, Yelp)
+        and a lighter delay for business websites.
+        """
+        domain = urlparse(url).netloc.lower()
+
+        # Determine delay based on domain
+        delay = SLOW_DELAY if any(sd in domain for sd in SLOW_DOMAINS) else FAST_DELAY
+
+        with self._lock:
+            last = self._domain_last_request.get(domain, 0)
+            elapsed = time.time() - last
+            if elapsed < delay:
+                jitter = random.uniform(0, delay * 0.3)
+                wait = delay - elapsed + jitter
+            else:
+                wait = 0
+            self._domain_last_request[domain] = time.time() + wait
+
+        if wait > 0:
+            time.sleep(wait)
 
     @retry(
         stop=stop_after_attempt(MAX_RETRIES),
@@ -61,21 +88,51 @@ class ScraperHttpClient:
             f"Retrying request (attempt {retry_state.attempt_number})"
         ),
     )
-    def get(self, url: str, params: dict = None) -> httpx.Response:
-        """Make a GET request with rate limiting and retries."""
-        self._rate_limit()
+    def get(self, url: str, params: dict = None, use_cache: bool = True) -> httpx.Response:
+        """Make a GET request with rate limiting, retries, and optional caching."""
+        cache_key = f"{url}|{params}"
+
+        # Check cache first
+        if use_cache and cache_key in self._response_cache:
+            logger.debug(f"CACHE HIT {url}")
+            return self._response_cache[cache_key]
+
+        self._rate_limit(url)
         headers = self._get_headers()
         logger.debug(f"GET {url}")
         response = self.client.get(url, headers=headers, params=params)
         response.raise_for_status()
+
+        # Store in cache
+        if use_cache:
+            self._response_cache[cache_key] = response
+
         return response
 
-    def get_soup(self, url: str, params: dict = None):
+    def get_soup(self, url: str, params: dict = None, use_cache: bool = True):
         """Make a GET request and return a BeautifulSoup object."""
         from bs4 import BeautifulSoup
 
-        response = self.get(url, params=params)
-        return BeautifulSoup(response.text, "lxml")
+        cache_key = f"{url}|{params}"
+
+        # Check soup cache first
+        if use_cache and cache_key in self._soup_cache:
+            logger.debug(f"SOUP CACHE HIT {url}")
+            return self._soup_cache[cache_key]
+
+        response = self.get(url, params=params, use_cache=use_cache)
+        soup = BeautifulSoup(response.text, "lxml")
+
+        # Store in soup cache
+        if use_cache:
+            self._soup_cache[cache_key] = soup
+
+        return soup
+
+    def clear_cache(self):
+        """Clear all response caches. Call between leads to free memory."""
+        self._response_cache.clear()
+        self._soup_cache.clear()
 
     def get_rendered_soup(self, url: str, params: dict = None, wait_selector: str = None, wait_ms: int = 3000):
         """
@@ -93,7 +150,7 @@ class ScraperHttpClient:
         """
         from bs4 import BeautifulSoup
 
-        self._rate_limit()
+        self._rate_limit(url)
 
         # Build full URL with params
         if params:
@@ -112,6 +169,7 @@ class ScraperHttpClient:
     def close(self):
         """Close the HTTP client and browser."""
         self.client.close()
+        self.clear_cache()
         if self._browser_client is not None:
             self._browser_client.close()
             self._browser_client = None

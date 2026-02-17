@@ -3,8 +3,10 @@ Lead Scraper CLI — US Local Business Lead Generation Tool
 
 Usage:
     python main.py run                     # Run full pipeline from config
-    python main.py scrape --source yelp    # Scrape specific source
+    python main.py scrape -s googlemaps    # Scrape Google Maps
+    python main.py scrape -s yellowpages   # Scrape Yellow Pages
     python main.py enrich                  # Enrich unenriched leads
+    python main.py re-enrich              # Re-enrich stale leads (>30 days)
     python main.py export --format csv     # Export leads
     python main.py stats                   # Show database stats
     python main.py init-db                 # Initialize database (run prisma migrate)
@@ -53,7 +55,7 @@ def run(ctx):
 
 
 @cli.command()
-@click.option("--source", "-s", required=True, help="Source: yellowpages, bbb, yelp")
+@click.option("--source", "-s", required=True, help="Source: googlemaps, yellowpages, bbb, yelp")
 @click.option("--category", "-cat", required=True, help="Business category to search")
 @click.option("--location", "-l", required=True, help="Location (e.g., 'Miami, FL')")
 @click.option("--pages", "-p", default=5, help="Max pages to scrape")
@@ -83,6 +85,48 @@ def enrich(ctx, limit):
     results = asyncio.run(engine.enrich_only(limit=limit))
 
     click.echo(f"\n  Total: {results['total']} | Success: {results['success']} | Failed: {results['failed']}")
+
+
+@cli.command("enrich-leads")
+@click.argument("lead_ids", nargs=-1, type=int, required=True)
+@click.pass_context
+def enrich_leads(ctx, lead_ids):
+    """Enrich specific leads by ID."""
+    from src.engine import ScraperEngine
+
+    if not lead_ids:
+        click.echo("Error: at least one lead ID is required")
+        raise SystemExit(1)
+
+    engine = ScraperEngine(ctx.obj["config"])
+    ids = list(lead_ids)
+
+    if len(ids) == 1:
+        click.echo(f"Enriching lead {ids[0]}...")
+        result = asyncio.run(engine.enrich_single(ids[0]))
+        click.echo(f"  {result['businessName']}: quality={result['qualityScore']}, icp={result['icpScore']}")
+    else:
+        click.echo(f"Enriching {len(ids)} leads...")
+        result = asyncio.run(engine.enrich_multiple(ids))
+        click.echo(f"  Total: {result['total']} | Success: {result['success']} | Failed: {result['failed']}")
+
+
+@cli.command("re-enrich")
+@click.option("--days", "-d", default=30, help="Re-enrich leads older than N days")
+@click.option("--limit", "-l", default=50, help="Max leads to re-enrich")
+@click.pass_context
+def re_enrich(ctx, days, limit):
+    """Re-enrich stale leads whose data may be outdated."""
+    from src.engine import ScraperEngine
+
+    engine = ScraperEngine(ctx.obj["config"])
+    click.echo(f"Re-enriching leads older than {days} days (max {limit})...")
+    results = asyncio.run(engine.re_enrich(stale_days=days, limit=limit))
+
+    click.echo(f"\n  Stale found: {results['stale_found']} | "
+               f"Total: {results['total']} | "
+               f"Success: {results['success']} | "
+               f"Failed: {results['failed']}")
 
 
 @cli.command()

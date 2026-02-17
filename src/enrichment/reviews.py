@@ -26,10 +26,16 @@ class ReviewsEnricher(BaseEnricher):
     def enrich(self, lead) -> dict:
         result = {}
 
-        # Try Google Business Profile
-        google_data = self._search_google_business(lead)
-        if google_data:
-            result.update(google_data)
+        # Try Google Business Profile — skip if google_intel already found rating
+        existing_rating = getattr(lead, "googleRating", None)
+        existing_gbp = getattr(lead, "hasGoogleBusinessProfile", None)
+        if not existing_rating:
+            google_data = self._search_google_business(lead)
+            if google_data:
+                result.update(google_data)
+        elif existing_gbp:
+            # google_intel already populated everything, no Google search needed
+            logger.debug(f"[Reviews] Skipping Google search — rating already set for {lead.businessName}")
 
         # Try Yelp search
         if not lead.yelpRating:

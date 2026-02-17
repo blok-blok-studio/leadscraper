@@ -22,28 +22,44 @@ targeting:
 
 scraping:
   # Sources to scrape (in priority order)
-  # NOTE: yellowpages is the primary working source (Playwright renders JS).
-  # yelp and bbb have aggressive bot detection — they may require
-  # residential proxies (PROXY_URL in .env) to work reliably.
+  # googlemaps uses Playwright to scrape Google Maps — richest local data
+  # yellowpages uses Playwright to render JS
+  # yelp and bbb have aggressive bot detection — may require proxies
   sources:
+    - googlemaps
     - yellowpages
     # - bbb    # Requires proxy — blocked without it
     # - yelp   # Requires proxy — blocked without it
   # Max leads per category per location
   max_leads_per_search: 100
-  # Pages to scrape per search
+  # Pages to scrape per search (for googlemaps: scroll batches)
   max_pages_per_search: 5
 
 enrichment:
   enabled: true
-  # Which enrichment modules to run
+  # Which enrichment modules to run (order matters!)
+  # Discovery → contact crawling → social/tech/reviews → verification → scoring
   modules:
-    - website_tech_stack
-    - social_media
-    - contact_enrichment
-    - reviews_ratings
+    - website_discovery       # Find website via Google when missing
+    - deep_contact            # Crawl all pages for hidden emails/phones
+    - email_discovery         # Find emails via Google/directories when missing
+    - phone_discovery         # Find phone numbers when missing
+    - website_tech_stack      # Detect CMS, analytics, tech stack
+    - social_media            # Find Facebook, Instagram, LinkedIn, etc.
+    - contact_enrichment      # Find owner name, title, LinkedIn
+    - reviews_ratings         # Google/Yelp ratings and reviews
+    - email_verification      # Verify emails (MX + SMTP probe)
+    - icp_scoring             # Score leads on business fit (ICP)
   # Timeout for enrichment requests (seconds)
   timeout: 15
+
+  # Re-enrichment settings
+  re_enrichment:
+    enabled: true
+    # Re-enrich leads older than this many days
+    stale_after_days: 30
+    # Max leads to re-enrich per cycle
+    max_per_cycle: 50
 
 deduplication:
   enabled: true

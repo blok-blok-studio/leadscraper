@@ -7,6 +7,11 @@ Run `prisma generate` to regenerate the client after schema changes.
 
 from __future__ import annotations
 
+import json as _json
+
+# Fields that are stored as Json type in Prisma and need serialization
+_JSON_FIELDS = {"techStack", "businessHours", "serviceOptions"}
+
 # Mapping from snake_case (used in scrapers/cleaning) to camelCase (Prisma field names)
 FIELD_MAP = {
     "business_name": "businessName",
@@ -41,9 +46,21 @@ FIELD_MAP = {
     "runs_google_ads": "runsGoogleAds",
     "runs_facebook_ads": "runsFacebookAds",
     "has_google_business_profile": "hasGoogleBusinessProfile",
+    "latitude": "latitude",
+    "longitude": "longitude",
+    "google_place_id": "googlePlaceId",
+    "business_hours": "businessHours",
+    "photo_count": "photoCount",
+    "price_level": "priceLevel",
+    "description": "description",
+    "service_options": "serviceOptions",
+    "email_verified": "emailVerified",
+    "owner_email_verified": "ownerEmailVerified",
+    "icp_score": "icpScore",
     "source_url": "sourceUrl",
     "scraped_at": "scrapedAt",
     "enriched_at": "enrichedAt",
+    "last_enriched_at": "lastEnrichedAt",
     "updated_at": "updatedAt",
     "is_enriched": "isEnriched",
     "enrichment_errors": "enrichmentErrors",
@@ -61,6 +78,11 @@ def to_prisma_data(snake_dict: dict) -> dict:
         if value is None:
             continue
         prisma_key = FIELD_MAP.get(key, key)
+        # Prisma Json fields must be passed as a JSON-serializable value.
+        # Convert dicts/lists to JSON strings to avoid GraphQL parse errors
+        # with keys like "Google Analytics" that contain spaces.
+        if prisma_key in _JSON_FIELDS and isinstance(value, (dict, list)):
+            value = _json.dumps(value)
         prisma_data[prisma_key] = value
     return prisma_data
 

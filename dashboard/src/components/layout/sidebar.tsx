@@ -8,10 +8,12 @@ import {
   Activity,
   Download,
   Zap,
+  Crosshair,
 } from "lucide-react";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/scrape", label: "Scrape Control", icon: Crosshair },
   { href: "/leads", label: "Leads", icon: Users },
   { href: "/jobs", label: "Scrape Jobs", icon: Activity },
 ];

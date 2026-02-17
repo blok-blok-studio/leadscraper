@@ -45,6 +45,11 @@ def clean_lead_data(data: dict) -> dict | None:
     if not data.get("business_name"):
         return None
 
+    # ── Filter dead / closed businesses ──
+    biz_name = data.get("business_name", "")
+    if re.search(r"\bCLOSED\b", biz_name, re.I):
+        return None
+
     cleaned = {}
 
     # Business name
@@ -86,6 +91,9 @@ def clean_lead_data(data: dict) -> dict | None:
         "year_established", "business_type", "google_rating",
         "google_review_count", "yelp_rating", "yelp_review_count",
         "bbb_rating", "bbb_accredited",
+        "latitude", "longitude", "google_place_id", "business_hours",
+        "photo_count", "price_level", "description", "service_options",
+        "has_google_business_profile",
     ]
     for field in optional_fields:
         if data.get(field) is not None:
@@ -173,38 +181,61 @@ def normalize_zip(zip_code: str) -> str:
 
 
 def calculate_quality_score(lead: dict) -> int:
-    """Calculate a 0-100 quality score for a lead."""
+    """Calculate a 0-100 quality score for a lead.
+
+    Heavily rewards finding the actual decision maker (owner, founder, etc.)
+    and their personal contact info — not just generic info@.
+    """
     score = 0
 
-    # Core fields (max 50 points)
+    # ── Core fields (max 40 points) ──
     if lead.get("business_name"):
-        score += 10
+        score += 8
     if lead.get("phone"):
-        score += 15
+        score += 10
     if lead.get("email"):
-        score += 15
+        email = lead["email"]
+        local = email.split("@")[0].lower() if email else ""
+        generic = {
+            "info", "contact", "hello", "support", "admin", "sales",
+            "billing", "office", "help", "service", "team",
+        }
+        if local in generic:
+            score += 7    # generic email is worth less
+        else:
+            score += 12   # personal email is worth more
     if lead.get("address") and lead.get("city") and lead.get("state"):
         score += 10
 
-    # Enrichment fields (max 30 points)
-    if lead.get("website"):
-        score += 5
+    # ── Decision maker / owner info (max 30 points) ──
     if lead.get("owner_name"):
         score += 10
-    if lead.get("category"):
+    if lead.get("owner_email"):
+        score += 8
+    if lead.get("owner_linkedin"):
         score += 5
-    if lead.get("employee_count"):
-        score += 5
-    if lead.get("year_established"):
-        score += 5
+    if lead.get("owner_title"):
+        score += 3
+    if lead.get("owner_phone"):
+        score += 4
 
-    # Online presence (max 20 points)
+    # ── Business details (max 15 points) ──
+    if lead.get("website"):
+        score += 4
+    if lead.get("category"):
+        score += 3
+    if lead.get("employee_count"):
+        score += 4
+    if lead.get("year_established"):
+        score += 4
+
+    # ── Online presence (max 15 points) ──
     if lead.get("google_rating"):
-        score += 5
+        score += 4
     if lead.get("yelp_rating"):
-        score += 5
+        score += 3
     social_fields = ["facebook_url", "instagram_url", "linkedin_url"]
     social_count = sum(1 for f in social_fields if lead.get(f))
-    score += min(social_count * 3, 10)
+    score += min(social_count * 3, 8)
 
     return min(score, 100)

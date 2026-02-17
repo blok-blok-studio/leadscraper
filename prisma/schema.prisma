@@ -64,16 +64,34 @@ model Lead {
   bbbRating         String?  @map("bbb_rating") @db.VarChar(10)
   bbbAccredited     Boolean? @map("bbb_accredited")
 
+  // Google Maps detail data
+  latitude       Float?   @map("latitude")
+  longitude      Float?   @map("longitude")
+  googlePlaceId  String?  @map("google_place_id") @db.VarChar(200)
+  businessHours  Json?    @default("{}") @map("business_hours")
+  photoCount     Int?     @map("photo_count")
+  priceLevel     String?  @map("price_level") @db.VarChar(10)
+  description    String?  @map("description") @db.Text
+  serviceOptions Json?    @default("{}") @map("service_options")
+
   // Ad spend indicators
   runsGoogleAds          Boolean? @map("runs_google_ads")
   runsFacebookAds        Boolean? @map("runs_facebook_ads")
   hasGoogleBusinessProfile Boolean? @map("has_google_business_profile")
+
+  // Email verification
+  emailVerified      Boolean? @map("email_verified")
+  ownerEmailVerified Boolean? @map("owner_email_verified")
+
+  // ICP scoring
+  icpScore    Int @default(0) @map("icp_score")
 
   // Meta
   source           String   @db.VarChar(100)
   sourceUrl        String?  @map("source_url") @db.VarChar(1000)
   scrapedAt        DateTime @default(now()) @map("scraped_at")
   enrichedAt       DateTime? @map("enriched_at")
+  lastEnrichedAt   DateTime? @map("last_enriched_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
   isEnriched       Boolean  @default(false) @map("is_enriched")
   enrichmentErrors String?  @map("enrichment_errors") @db.Text

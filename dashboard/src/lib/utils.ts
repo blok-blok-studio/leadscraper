@@ -54,3 +54,17 @@ export function qualityBadgeColor(score: number): string {
   if (score >= 40) return "bg-amber-100 text-amber-700";
   return "bg-red-100 text-red-700";
 }
+
+export function icpBadgeColor(score: number): string {
+  if (score >= 70) return "bg-violet-100 text-violet-700";
+  if (score >= 40) return "bg-blue-100 text-blue-700";
+  if (score >= 20) return "bg-slate-100 text-slate-600";
+  return "bg-gray-100 text-gray-500";
+}
+
+export function icpLabel(score: number): string {
+  if (score >= 70) return "Hot";
+  if (score >= 40) return "Warm";
+  if (score >= 20) return "Cool";
+  return "Cold";
+}

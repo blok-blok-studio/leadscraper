@@ -3,14 +3,32 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 
 from prisma import Prisma
 from prisma.models import Lead, ScrapeJob
+from rapidfuzz import fuzz
 
 from src.database.models import to_prisma_data
+from src.utils.cleaning import normalize_phone, normalize_email
 
 logger = logging.getLogger(__name__)
+
+# ── Fuzzy name matching helpers ──────────────────────────────────────────
+
+_BIZ_SUFFIXES = re.compile(
+    r'\b(llc|inc|corp|corporation|co|ltd|lp|llp|pc|pllc|company|group|'
+    r'services|service|enterprises|enterprise|associates|holdings|solutions)\b',
+    re.I,
+)
+
+
+def _normalize_biz_name(name: str) -> str:
+    """Strip business suffixes and punctuation for fuzzy comparison."""
+    name = _BIZ_SUFFIXES.sub('', name.lower())
+    name = re.sub(r'[^\w\s]', '', name)
+    return ' '.join(name.split())
 
 
 class LeadRepository:
@@ -38,24 +56,29 @@ class LeadRepository:
         return lead, True
 
     async def _find_duplicate(self, lead_data: dict):
-        """Check for duplicate lead by phone, email, or name+address."""
-        phone = lead_data.get("phone")
-        email = lead_data.get("email")
+        """Check for duplicate lead by normalized phone, email, name+address, or fuzzy name match."""
+        raw_phone = lead_data.get("phone")
+        raw_email = lead_data.get("email")
         name = lead_data.get("business_name")
         address = lead_data.get("address")
         city = lead_data.get("city")
         state = lead_data.get("state")
 
+        # ── 1. Normalize phone then match ──
+        phone = normalize_phone(raw_phone)
         if phone:
             match = await self.db.lead.find_first(where={"phone": phone})
             if match:
                 return match
 
+        # ── 2. Normalize email then match ──
+        email = normalize_email(raw_email)
         if email:
             match = await self.db.lead.find_first(where={"email": email})
             if match:
                 return match
 
+        # ── 3. Exact name + address match (case-insensitive) ──
         if name and address and city and state:
             match = await self.db.lead.find_first(
                 where={
@@ -67,6 +90,26 @@ class LeadRepository:
             )
             if match:
                 return match
+
+        # ── 4. Fuzzy name match within same city+state ──
+        if name and city and state:
+            normalized_incoming = _normalize_biz_name(name)
+            if normalized_incoming:
+                candidates = await self.db.lead.find_many(
+                    where={
+                        "city": {"equals": city, "mode": "insensitive"},
+                        "state": state.upper(),
+                    },
+                    take=50,
+                )
+                for candidate in candidates:
+                    normalized_existing = _normalize_biz_name(candidate.businessName)
+                    if normalized_existing and fuzz.ratio(normalized_incoming, normalized_existing) >= 85:
+                        logger.debug(
+                            f"[Dedup] Fuzzy match: '{name}' ≈ '{candidate.businessName}' "
+                            f"(score={fuzz.ratio(normalized_incoming, normalized_existing)})"
+                        )
+                        return candidate
 
         return None
 

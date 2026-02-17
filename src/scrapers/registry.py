@@ -6,9 +6,11 @@ from src.scrapers.base import BaseScraper
 from src.scrapers.yellowpages import YellowPagesScraper
 from src.scrapers.bbb import BBBScraper
 from src.scrapers.yelp import YelpScraper
+from src.scrapers.googlemaps import GoogleMapsScraper
 
 SCRAPERS: dict[str, type[BaseScraper]] = {
     "yellowpages": YellowPagesScraper,
+    "googlemaps": GoogleMapsScraper,
     "bbb": BBBScraper,
     "yelp": YelpScraper,
 }

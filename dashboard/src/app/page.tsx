@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { Header } from "@/components/layout/header";
 import { StatsCards } from "@/components/dashboard/stats-cards";
+import { EnrichButton } from "@/components/dashboard/enrich-button";
+import { ReEnrichButton } from "@/components/dashboard/re-enrich-button";
 import { Charts } from "@/components/dashboard/charts";
 import { RecentJobs } from "@/components/dashboard/recent-jobs";
 
@@ -8,7 +10,9 @@ export default async function DashboardPage() {
   const [
     totalLeads,
     enrichedLeads,
+    unenrichedLeads,
     avgQualityResult,
+    avgIcpResult,
     distinctSources,
     byStateRaw,
     byCategoryRaw,
@@ -16,7 +20,9 @@ export default async function DashboardPage() {
   ] = await Promise.all([
     prisma.lead.count(),
     prisma.lead.count({ where: { isEnriched: true } }),
+    prisma.lead.count({ where: { isEnriched: false } }),
     prisma.lead.aggregate({ _avg: { qualityScore: true } }),
+    prisma.lead.aggregate({ _avg: { icpScore: true } }),
     prisma.lead.findMany({
       select: { source: true },
       distinct: ["source"],
@@ -42,6 +48,7 @@ export default async function DashboardPage() {
   ]);
 
   const avgQuality = Math.round(avgQualityResult._avg.qualityScore ?? 0);
+  const avgIcp = Math.round(avgIcpResult._avg.icpScore ?? 0);
   const sourcesActive = distinctSources.length;
 
   const byState = byStateRaw.map((row) => ({
@@ -66,8 +73,13 @@ export default async function DashboardPage() {
           totalLeads={totalLeads}
           enrichedLeads={enrichedLeads}
           avgQuality={avgQuality}
+          avgIcp={avgIcp}
           sourcesActive={sourcesActive}
         />
+
+        <EnrichButton unenrichedCount={unenrichedLeads} />
+
+        <ReEnrichButton enrichedCount={enrichedLeads} />
 
         <Charts byState={byState} byCategory={byCategory} />
 
